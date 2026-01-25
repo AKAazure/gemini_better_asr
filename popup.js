@@ -60,7 +60,6 @@ function init() {
   // --- Microphone Test Logic ---
   
   const micContainer = document.getElementById('micTestContainer');
-  console.log(micContainer)
   let isRecording = false;
   let audioContext = null;
   let analyser = null;
@@ -99,9 +98,9 @@ function init() {
         mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
         console.log("Microphone access granted");
         
-        await setupVisualizer(mediaStream);
         
         isRecording = true;
+        await setupVisualizer(mediaStream);
         btn.innerHTML = WAVEFORM_HTML;
         btn.classList.add("recording");
         
@@ -131,6 +130,7 @@ function init() {
 
   async function setupVisualizer(stream) {
     try {
+      console.debug("Setting up visualizer...");
       audioContext = new AudioContext();
       if (audioContext.state === 'suspended') {
         await audioContext.resume();
@@ -143,6 +143,7 @@ function init() {
       analyser.smoothingTimeConstant = 0.5; // More responsive
       source.connect(analyser);
       
+      console.debug("Visualizer set up, starting visualize()");
       visualize();
     } catch (e) {
       console.error("Audio Context Setup Error:", e);
@@ -150,7 +151,10 @@ function init() {
   }
 
   function visualize() {
-    if (!isRecording || !analyser) return;
+    if (!isRecording || !analyser) {
+      console.log("Visualize early return:", { isRecording, analyser: !!analyser });
+      return;
+    }
     
     const bufferLength = analyser.frequencyBinCount;
     const dataArray = new Uint8Array(bufferLength);

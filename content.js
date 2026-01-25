@@ -120,6 +120,7 @@ async function handleMicClick(e) {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       
       // Setup Audio Context for visualization
+      isRecording = true
       await setupVisualizer(stream);
 
       mediaRecorder = new MediaRecorder(stream);
@@ -190,7 +191,10 @@ async function setupVisualizer(stream) {
 }
 
 function visualize() {
-  if (!isRecording || !analyser) return;
+  if (!isRecording || !analyser) {
+    console.debug("Visualize early return:", { isRecording, analyser: !!analyser });
+    return;
+  }
   
   const bufferLength = analyser.frequencyBinCount;
   const dataArray = new Uint8Array(bufferLength);
