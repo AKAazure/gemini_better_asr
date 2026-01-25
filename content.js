@@ -61,7 +61,7 @@ style.textContent = `
     width: 3px;
     background-color: #ef4444;
     border-radius: 2px;
-    height: 20%;
+    height: 10%; /* Default idle height */
     transition: height 0.05s ease;
     will-change: height;
   }
@@ -169,6 +169,7 @@ function setupVisualizer(stream) {
   const source = audioContext.createMediaStreamSource(stream);
   analyser = audioContext.createAnalyser();
   analyser.fftSize = 64; // Small fftSize for low resolution bars (32 bins)
+  analyser.smoothingTimeConstant = 0.5; // Make it responsive but not too jittery
   source.connect(analyser);
   
   visualize();
@@ -181,20 +182,39 @@ function visualize() {
   const dataArray = new Uint8Array(bufferLength);
   analyser.getByteFrequencyData(dataArray);
   
-  // We have 5 bars in the DOM. Map frequency bins to these bars.
-  // fftSize 64 => 32 bins (0-22kHz approx). 
-  // Voice is mostly lower frequencies, so we look at lower indices.
+  // Calculate average volume to determine "silence" vs "speaking"
+  // Focus on voice frequency range (bins 1-10 approx) for volume detection
+  let sum = 0;
+  const relevantBins = 10;
+  for(let i = 1; i <= relevantBins; i++) {
+    sum += dataArray[i] || 0;
+  }
+  const averageVolume = sum / relevantBins;
+
   const bars = document.querySelectorAll('.gemini-voice-bar');
   if (bars.length === 5) {
-    for (let i = 0; i < 5; i++) {
-        // Map 0-255 volume to 20%-100% height
-        // We pick dispersed bins to represent different frequencies
-        const binIndex = (i * 2) + 1; // e.g., 1, 3, 5, 7, 9
-        const value = dataArray[binIndex] || 0;
-        const percent = 20 + (value / 255) * 80;
-        
-        bars[i].style.height = `${percent}%`;
-    }
+      // Noise gate threshold: 10/255 is very quiet
+      if (averageVolume < 10) {
+        bars.forEach(bar => bar.style.height = '10%');
+      } else {
+        // Map frequency bins to bars
+        for (let i = 0; i < 5; i++) {
+            // Distribute bins to cover voice range
+            // Bin 0 is often DC offset/rumble, start from 1
+            const binIndex = i + 1; 
+            const value = dataArray[binIndex] || 0;
+            
+            // Map 0-255 to 10%-100%
+            // We use the value directly for amplitude
+            let percent = 10 + ((value / 255) * 90);
+            
+            // Limit to 100%
+            if (percent > 100) percent = 100;
+            if (percent < 10) percent = 10;
+            
+            bars[i].style.height = `${percent}%`;
+        }
+      }
   }
   
   animationId = requestAnimationFrame(visualize);
