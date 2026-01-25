@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "Gemini Voice Input",
+  "version": "1.0",
+  "description": "Add speech-to-text functionality to Google Gemini and NotebookLM",
+  "permissions": ["activeTab", "storage", "scripting"],
+  "host_permissions": ["https://api.openai.com/*"],
+  "action": {
+    "default_popup": "index.html",
+    "default_title": "Gemini Voice Settings"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://gemini.google.com/*",
+        "https://notebooklm.google.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
+  }
+}
