@@ -14,6 +14,7 @@ function createMicButton() {
   btn.innerHTML = ICON_SVG;
   btn.className = "gemini-voice-btn";
   btn.title = "Speak to Type";
+  btn.type = "button"; // Prevent form submission
   
   // Basic styles injection
   btn.style.cssText = `
@@ -22,13 +23,16 @@ function createMicButton() {
     justify-content: center;
     width: 40px;
     height: 40px;
+    min-width: 40px;
     border-radius: 50%;
     border: none;
     cursor: pointer;
     background: transparent;
     color: #444746;
     transition: background 0.2s;
-    margin-right: 8px;
+    margin: 0 4px;
+    z-index: 999;
+    flex-shrink: 0;
   `;
 
   btn.addEventListener("mouseover", () => {
@@ -44,6 +48,7 @@ function createMicButton() {
 
 async function handleMicClick(e) {
   e.preventDefault();
+  e.stopPropagation(); // Stop event bubbling
   const btn = e.currentTarget;
 
   if (!isRecording) {
@@ -84,7 +89,7 @@ async function handleMicClick(e) {
       btn.classList.add("recording");
     } catch (err) {
       console.error("Mic Error:", err);
-      alert("Could not access microphone.");
+      alert("Could not access microphone. Please ensure permission is granted.");
     }
   } else {
     // Stop Recording
@@ -93,13 +98,15 @@ async function handleMicClick(e) {
     btn.innerHTML = `<div class="spinner"></div>`;
     
     // Inject simple spinner style temporarily
-    const spinnerStyle = document.createElement('style');
-    spinnerStyle.id = 'temp-spinner-style';
-    spinnerStyle.textContent = `
-      .spinner { border: 2px solid #f3f3f3; border-top: 2px solid #3498db; border-radius: 50%; width: 16px; height: 16px; animation: spin 1s linear infinite; }
-      @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-    `;
-    document.head.appendChild(spinnerStyle);
+    if (!document.getElementById('temp-spinner-style')) {
+      const spinnerStyle = document.createElement('style');
+      spinnerStyle.id = 'temp-spinner-style';
+      spinnerStyle.textContent = `
+        .spinner { border: 2px solid #f3f3f3; border-top: 2px solid #3498db; border-radius: 50%; width: 16px; height: 16px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+      `;
+      document.head.appendChild(spinnerStyle);
+    }
   }
 }
 
@@ -111,41 +118,52 @@ function sendToBackground(base64Audio, apiKey) {
       if (btn) {
         btn.innerHTML = ICON_SVG;
         btn.style.color = "#444746";
-        const style = document.getElementById('temp-spinner-style');
-        if (style) style.remove();
       }
 
       if (response && response.success) {
         insertText(response.text);
       } else {
         console.error("Transcription failed:", response ? response.error : "Unknown error");
-        alert("Transcription failed. Check console for details.");
+        alert("Transcription failed. Please check your API key.");
       }
     }
   );
 }
 
 function insertText(text) {
-  // Gemini usually uses a contenteditable div with role="textbox"
   const inputArea = document.querySelector('div[contenteditable="true"][role="textbox"]') || 
                     document.querySelector('textarea');
   
   if (inputArea) {
     inputArea.focus();
     
-    // Method 1: execCommand (deprecated but reliable for contenteditable)
-    const success = document.execCommand('insertText', false, text);
-    
-    // Method 2: Fallback for newer React environments if execCommand fails
-    if (!success) {
-      if (inputArea.tagName === 'TEXTAREA') {
-        const start = inputArea.selectionStart;
-        const end = inputArea.selectionEnd;
-        const val = inputArea.value;
-        inputArea.value = val.slice(0, start) + text + val.slice(end);
-        inputArea.dispatchEvent(new Event('input', { bubbles: true }));
+    // NotebookLM and modern React apps usually use Textarea
+    if (inputArea.tagName === 'TEXTAREA') {
+      const start = inputArea.selectionStart;
+      const end = inputArea.selectionEnd;
+      const originalValue = inputArea.value;
+      const newValue = originalValue.slice(0, start) + text + originalValue.slice(end);
+      
+      // Robust React input update
+      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+      if (nativeInputValueSetter) {
+        nativeInputValueSetter.call(inputArea, newValue);
       } else {
-        inputArea.textContent += text; // Crude fallback
+        inputArea.value = newValue;
+      }
+      
+      // Dispatch multiple events to ensure React picks it up
+      inputArea.dispatchEvent(new Event('input', { bubbles: true }));
+      inputArea.dispatchEvent(new Event('change', { bubbles: true }));
+    } 
+    // Gemini often uses ContentEditable div
+    else {
+      // Try deprecated but reliable execCommand first
+      const success = document.execCommand('insertText', false, text);
+      
+      // Fallback if execCommand fails
+      if (!success) {
+        inputArea.textContent += text;
         inputArea.dispatchEvent(new Event('input', { bubbles: true }));
       }
     }
@@ -162,25 +180,57 @@ function getApiKey() {
 
 // Observer to inject button when input area appears
 const observer = new MutationObserver((mutations) => {
-  const inputArea = document.querySelector('div[contenteditable="true"][role="textbox"]');
-  // Usually the input is wrapped in a container. We want to append to the toolbar or near the input.
-  // Gemini structure changes, but typically looking for the parent container of the input or the send button container.
+  // Broad selector to find input areas in both Gemini (div) and NotebookLM (textarea)
+  const inputArea = document.querySelector('div[contenteditable="true"][role="textbox"]') || 
+                    document.querySelector('textarea');
   
+  // If input exists but our button doesn't
   if (inputArea && !document.querySelector(".gemini-voice-btn")) {
-    const container = inputArea.parentElement;
-    if (container) {
-      // Find the best place to insert. Usually after the input or before the send button.
-      // We'll prepend it to the container for visibility or append to a toolbar if found.
-      const btn = createMicButton();
-      
-      // Try to find the send button wrapper to place it next to
-      const sendButton = document.querySelector('button[aria-label*="Send"]');
-      if (sendButton && sendButton.parentElement) {
-        sendButton.parentElement.insertBefore(btn, sendButton);
-      } else {
-        // Fallback: place inside the input container
-        container.appendChild(btn);
+    
+    const btn = createMicButton();
+    
+    // Strategy 1: Look for the Send button to place next to (cleanest UI)
+    // Common labels for Send button in Google apps
+    const sendSelectors = [
+      'button[aria-label*="Send"]',
+      'button[aria-label*="发送"]', // Chinese
+      'button[aria-label*="Submit"]',
+      '.send-button',
+      'button:has(svg)' // Generic button with icon as last resort near input
+    ];
+
+    let sendButton = null;
+    
+    // Look for send button within the same container or nearby context
+    // We traverse up to find a common container, then query down
+    const container = inputArea.closest('div.input-area, form, footer, main') || document.body;
+    
+    for (let selector of sendSelectors) {
+      // Find a button inside the container that is NOT our button
+      const candidate = container.querySelector(selector);
+      if (candidate && !candidate.classList.contains('gemini-voice-btn')) {
+        sendButton = candidate;
+        break;
       }
+    }
+
+    if (sendButton && sendButton.parentElement) {
+       // Insert before the send button
+       sendButton.parentElement.insertBefore(btn, sendButton);
+       // Ensure parent aligns items centered
+       sendButton.parentElement.style.alignItems = 'center';
+    } 
+    // Strategy 2: Append to the parent of the input area (NotebookLM often)
+    else if (inputArea.parentElement) {
+       const parent = inputArea.parentElement;
+       parent.appendChild(btn);
+       
+       // Force flex layout if not present to show side-by-side
+       const style = window.getComputedStyle(parent);
+       if (style.display !== 'flex' && style.display !== 'grid') {
+         parent.style.display = 'flex';
+         parent.style.alignItems = 'center';
+       }
     }
   }
 });
