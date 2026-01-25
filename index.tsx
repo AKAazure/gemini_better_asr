@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Mic, Save, Settings, Square, Loader2, Info, Key, Check, Globe } from 'lucide-react';
 
+declare const chrome: any;
+
 const App = () => {
   const [apiKey, setApiKey] = useState('');
   const [isRecording, setIsRecording] = useState(false);
@@ -13,12 +15,31 @@ const App = () => {
   const chunksRef = useRef<Blob[]>([]);
 
   useEffect(() => {
-    const storedKey = localStorage.getItem('openai_api_key');
-    if (storedKey) setApiKey(storedKey);
+    // Try to retrieve from Chrome extension storage first (for the actual extension)
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.get(['openai_api_key'], (result: any) => {
+        if (result.openai_api_key) {
+          setApiKey(result.openai_api_key);
+        }
+      });
+    } else {
+      // Fallback to localStorage for development/web preview
+      const storedKey = localStorage.getItem('openai_api_key');
+      if (storedKey) setApiKey(storedKey);
+    }
   }, []);
 
   const handleSaveKey = () => {
+    // Save to Chrome extension storage so content scripts can access it
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.set({ openai_api_key: apiKey }, () => {
+        console.log('API Key saved to chrome.storage.local');
+      });
+    }
+
+    // Also save to localStorage for development environment consistency
     localStorage.setItem('openai_api_key', apiKey);
+    
     setShowSaved(true);
     setTimeout(() => setShowSaved(false), 2000);
   };
@@ -123,7 +144,7 @@ const App = () => {
               <Info className="w-5 h-5 shrink-0" />
               <p>
                 An OpenAI API Key is required for high-quality Whisper transcription. 
-                Your key is stored locally in your browser/extension storage.
+                Your key is stored securely in your browser's extension storage.
               </p>
             </div>
 
