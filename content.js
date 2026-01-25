@@ -25,9 +25,21 @@ style.textContent = `
     z-index: 999;
     flex-shrink: 0;
   }
+  
+  /* Dark theme support for NotebookLM */
+  body.dark-theme .gemini-voice-btn, 
+  .dark-theme .gemini-voice-btn {
+    color: #e3e3e3;
+  }
+
   .gemini-voice-btn:hover {
     background: rgba(68, 71, 70, 0.08);
   }
+  body.dark-theme .gemini-voice-btn:hover,
+  .dark-theme .gemini-voice-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+  }
+
   .gemini-voice-btn.recording {
     background: rgba(239, 68, 68, 0.1);
   }
@@ -239,10 +251,13 @@ function getApiKey() {
 
 // Robust Observer to handle various NotebookLM and Gemini layouts
 const observer = new MutationObserver((mutations) => {
-  // 1. Main Chat Inputs (Textarea or ContentEditable)
-  // 2. Modal Inputs (Input[type=text])
+  // 1. NotebookLM Main Chat Input
+  // 2. NotebookLM Modal Input
+  // 3. Generic inputs
   
   const potentialInputs = document.querySelectorAll(`
+    textarea.query-box-input:not(.has-gemini-voice),
+    textarea.query-box-textarea:not(.has-gemini-voice),
     textarea:not(.has-gemini-voice), 
     div[contenteditable="true"][role="textbox"]:not(.has-gemini-voice),
     input[type="text"]:not(.has-gemini-voice)
@@ -256,10 +271,6 @@ const observer = new MutationObserver((mutations) => {
     // But be permissive enough for "Search" or "Start typing"
     const placeholder = input.getAttribute('placeholder') || input.getAttribute('aria-label') || "";
     
-    // NotebookLM Modal "Add Source" check
-    // The specific modal in the screenshot is "在网络中搜索新来源" or "Web"
-    // We want to be careful not to inject into EVERY text input, but search/chat inputs are safe.
-    
     injectButton(input);
   });
 });
@@ -267,41 +278,61 @@ const observer = new MutationObserver((mutations) => {
 function injectButton(inputElement) {
   if (inputElement.classList.contains('has-gemini-voice')) return;
   
-  // Mark as processed
-  inputElement.classList.add('has-gemini-voice');
-
   const btn = createMicButton();
 
-  // PLACEMENT LOGIC
-  
-  // Case 1: NotebookLM Search Modal (usually input inside a wrapper)
-  // We often want to put it at the end of the wrapper
-  if (inputElement.tagName === 'INPUT') {
-    // Usually these are inside a div with other icons
-    const wrapper = inputElement.parentElement;
-    if (wrapper) {
-      wrapper.appendChild(btn);
-      wrapper.style.display = 'flex';
-      wrapper.style.alignItems = 'center';
+  // NOTEBOOKLM SPECIFIC PLACEMENT LOGIC
+
+  // 1. Main Chat Bar (NotebookLM)
+  // Input class: 'query-box-input'
+  // Container class: 'message-container'
+  // Sibling Button class: 'submit-button'
+  if (inputElement.classList.contains('query-box-input')) {
+    const container = inputElement.closest('.message-container');
+    if (container) {
+      const submitBtn = container.querySelector('.submit-button');
+      if (submitBtn) {
+        inputElement.classList.add('has-gemini-voice');
+        container.insertBefore(btn, submitBtn);
+        return;
+      }
+    }
+  }
+
+  // 2. Add Source Modal (NotebookLM)
+  // Input class: 'query-box-textarea'
+  // Container class: 'query-box' (Flex container)
+  if (inputElement.classList.contains('query-box-textarea')) {
+    const queryBox = inputElement.closest('.query-box');
+    if (queryBox) {
+      inputElement.classList.add('has-gemini-voice');
+      // Append to the end of the flex container (right of the input)
+      queryBox.appendChild(btn);
       return;
     }
   }
 
-  // Case 2: Chat Box (NotebookLM bottom bar / Gemini)
+  // GENERIC PLACEMENT LOGIC (Fallback for Gemini / other parts)
+  
+  // Case 3: Generic Chat Box (e.g. Gemini)
   // Look for a submit/send button
   const container = inputElement.closest('div.input-area, form, footer, main') || inputElement.parentElement;
   
   if (container) {
     const sendSelectors = [
+      'button.submit-button',
+      '.actions-enter-button',
       'button[aria-label*="Send"]',
-      'button[aria-label*="发送"]',
+      'button[aria-label*="发送"]', // Chinese Send
       'button[aria-label*="Submit"]',
+      'button[aria-label*="提交"]', // Chinese Submit
       '.send-button',
       'button:has(svg)'
     ];
 
     let sendButton = null;
     for (let selector of sendSelectors) {
+      // Find a button inside the container that is NOT our button
+      // and NOT a menu button (often has 'more_vert')
       const candidate = container.querySelector(selector);
       if (candidate && !candidate.classList.contains('gemini-voice-btn')) {
         sendButton = candidate;
@@ -311,11 +342,13 @@ function injectButton(inputElement) {
 
     if (sendButton && sendButton.parentElement) {
       // Insert next to send button
+      inputElement.classList.add('has-gemini-voice');
       sendButton.parentElement.insertBefore(btn, sendButton);
       sendButton.parentElement.style.alignItems = 'center';
     } else {
       // Fallback: Append to input's direct parent
       if (inputElement.parentElement) {
+         inputElement.classList.add('has-gemini-voice');
          inputElement.parentElement.appendChild(btn);
          inputElement.parentElement.style.display = 'flex';
          inputElement.parentElement.style.alignItems = 'center';
