@@ -4,6 +4,9 @@ console.log("Gemini Voice Input Extension Loaded");
 let mediaRecorder = null;
 let audioChunks = [];
 let isRecording = false;
+let audioContext = null;
+let analyser = null;
+let animationId = null;
 
 // 1. Inject CSS for Waveform Animation and Button Styles
 const style = document.createElement('style');
@@ -58,19 +61,10 @@ style.textContent = `
     width: 3px;
     background-color: #ef4444;
     border-radius: 2px;
-    animation: gemini-wave 1s ease-in-out infinite;
+    height: 20%;
+    transition: height 0.05s ease;
+    will-change: height;
   }
-  
-  @keyframes gemini-wave {
-    0%, 100% { height: 20%; }
-    50% { height: 100%; }
-  }
-  
-  .gemini-voice-bar:nth-child(1) { animation-delay: 0.0s; }
-  .gemini-voice-bar:nth-child(2) { animation-delay: 0.2s; }
-  .gemini-voice-bar:nth-child(3) { animation-delay: 0.4s; }
-  .gemini-voice-bar:nth-child(4) { animation-delay: 0.15s; }
-  .gemini-voice-bar:nth-child(5) { animation-delay: 0.3s; }
 
   /* Spinner for processing */
   .gemini-voice-spinner {
@@ -122,6 +116,10 @@ async function handleMicClick(e) {
       }
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      
+      // Setup Audio Context for visualization
+      setupVisualizer(stream);
+
       mediaRecorder = new MediaRecorder(stream);
       audioChunks = [];
 
@@ -137,6 +135,7 @@ async function handleMicClick(e) {
           const base64data = reader.result;
           sendToBackground(base64data, apiKey, btn);
         };
+        // Stop all tracks to release mic
         stream.getTracks().forEach(track => track.stop());
       };
 
@@ -156,9 +155,59 @@ async function handleMicClick(e) {
     if (mediaRecorder) mediaRecorder.stop();
     isRecording = false;
     
+    // Stop Visualizer immediately
+    stopVisualizer();
+    
     // Update UI to Spinner
     btn.innerHTML = `<div class="gemini-voice-spinner"></div>`;
     btn.classList.remove("recording");
+  }
+}
+
+function setupVisualizer(stream) {
+  audioContext = new AudioContext();
+  const source = audioContext.createMediaStreamSource(stream);
+  analyser = audioContext.createAnalyser();
+  analyser.fftSize = 64; // Small fftSize for low resolution bars (32 bins)
+  source.connect(analyser);
+  
+  visualize();
+}
+
+function visualize() {
+  if (!isRecording) return;
+  
+  const bufferLength = analyser.frequencyBinCount;
+  const dataArray = new Uint8Array(bufferLength);
+  analyser.getByteFrequencyData(dataArray);
+  
+  // We have 5 bars in the DOM. Map frequency bins to these bars.
+  // fftSize 64 => 32 bins (0-22kHz approx). 
+  // Voice is mostly lower frequencies, so we look at lower indices.
+  const bars = document.querySelectorAll('.gemini-voice-bar');
+  if (bars.length === 5) {
+    for (let i = 0; i < 5; i++) {
+        // Map 0-255 volume to 20%-100% height
+        // We pick dispersed bins to represent different frequencies
+        const binIndex = (i * 2) + 1; // e.g., 1, 3, 5, 7, 9
+        const value = dataArray[binIndex] || 0;
+        const percent = 20 + (value / 255) * 80;
+        
+        bars[i].style.height = `${percent}%`;
+    }
+  }
+  
+  animationId = requestAnimationFrame(visualize);
+}
+
+function stopVisualizer() {
+  if (animationId) {
+    cancelAnimationFrame(animationId);
+    animationId = null;
+  }
+  if (audioContext) {
+    audioContext.close().catch(console.error);
+    audioContext = null;
   }
 }
 
