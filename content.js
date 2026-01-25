@@ -29,9 +29,10 @@ style.textContent = `
     flex-shrink: 0;
   }
   
-  /* Dark theme support for NotebookLM */
+  /* Dark theme support for NotebookLM and Gemini */
   body.dark-theme .gemini-voice-btn, 
-  .dark-theme .gemini-voice-btn {
+  .dark-theme .gemini-voice-btn,
+  [data-theme="dark"] .gemini-voice-btn {
     color: #e3e3e3;
   }
 
@@ -39,7 +40,8 @@ style.textContent = `
     background: rgba(68, 71, 70, 0.08);
   }
   body.dark-theme .gemini-voice-btn:hover,
-  .dark-theme .gemini-voice-btn:hover {
+  .dark-theme .gemini-voice-btn:hover,
+  [data-theme="dark"] .gemini-voice-btn:hover {
     background: rgba(255, 255, 255, 0.08);
   }
 
@@ -118,7 +120,7 @@ async function handleMicClick(e) {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       
       // Setup Audio Context for visualization
-      setupVisualizer(stream);
+      await setupVisualizer(stream);
 
       mediaRecorder = new MediaRecorder(stream);
       audioChunks = [];
@@ -164,56 +166,75 @@ async function handleMicClick(e) {
   }
 }
 
-function setupVisualizer(stream) {
-  audioContext = new AudioContext();
-  const source = audioContext.createMediaStreamSource(stream);
-  analyser = audioContext.createAnalyser();
-  analyser.fftSize = 64; // Small fftSize for low resolution bars (32 bins)
-  analyser.smoothingTimeConstant = 0.5; // Make it responsive but not too jittery
-  source.connect(analyser);
-  
-  visualize();
+async function setupVisualizer(stream) {
+  try {
+    audioContext = new AudioContext();
+    
+    // Resume context if suspended (common browser policy)
+    if (audioContext.state === 'suspended') {
+      await audioContext.resume();
+    }
+
+    const source = audioContext.createMediaStreamSource(stream);
+    analyser = audioContext.createAnalyser();
+    
+    // Increase fftSize for better resolution, we will downsample to 5 bars
+    analyser.fftSize = 256; 
+    analyser.smoothingTimeConstant = 0.6; // Slightly smoother
+    source.connect(analyser);
+    
+    visualize();
+  } catch (e) {
+    console.error("Audio Context Setup Error:", e);
+  }
 }
 
 function visualize() {
-  if (!isRecording) return;
+  if (!isRecording || !analyser) return;
   
   const bufferLength = analyser.frequencyBinCount;
   const dataArray = new Uint8Array(bufferLength);
   analyser.getByteFrequencyData(dataArray);
   
-  // Calculate average volume to determine "silence" vs "speaking"
-  // Focus on voice frequency range (bins 1-10 approx) for volume detection
+  // Calculate average volume roughly 0-255
+  // We use a range of bins that represent speech frequencies
+  // fftSize 256 -> bin width ~172Hz (assuming 44.1kHz)
+  // Voice fundamental freq ~85-255Hz. Harmonics up to 3-4kHz.
+  // Bins 1 to 20 cover approx 170Hz to 3400Hz.
   let sum = 0;
-  const relevantBins = 10;
-  for(let i = 1; i <= relevantBins; i++) {
-    sum += dataArray[i] || 0;
+  const startBin = 1;
+  const endBin = 20;
+  for(let i = startBin; i <= endBin; i++) {
+    sum += dataArray[i];
   }
-  const averageVolume = sum / relevantBins;
+  const averageVolume = sum / (endBin - startBin + 1);
 
   const bars = document.querySelectorAll('.gemini-voice-bar');
   if (bars.length === 5) {
-      // Noise gate threshold: 10/255 is very quiet
-      if (averageVolume < 10) {
+      // Noise gate: Threshold to ignore background hum
+      if (averageVolume < 5) {
         bars.forEach(bar => bar.style.height = '10%');
       } else {
-        // Map frequency bins to bars
-        for (let i = 0; i < 5; i++) {
-            // Distribute bins to cover voice range
-            // Bin 0 is often DC offset/rumble, start from 1
-            const binIndex = i + 1; 
-            const value = dataArray[binIndex] || 0;
+        // Distribute bars across the frequency spectrum
+        // We pick 5 representative points
+        const indices = [2, 4, 8, 12, 16]; // Low to Mid frequencies
+        
+        bars.forEach((bar, i) => {
+            const val = dataArray[indices[i]] || 0;
             
-            // Map 0-255 to 10%-100%
-            // We use the value directly for amplitude
-            let percent = 10 + ((value / 255) * 90);
+            // Dynamic scaling:
+            // Input 0-255. 
+            // We want output 10% - 100%.
             
-            // Limit to 100%
+            // Boost low signals slightly so they are visible
+            let percent = 10 + (val / 255) * 120;
+            
+            // Clamp
             if (percent > 100) percent = 100;
             if (percent < 10) percent = 10;
             
-            bars[i].style.height = `${percent}%`;
-        }
+            bar.style.height = `${percent}%`;
+        });
       }
   }
   
@@ -229,6 +250,7 @@ function stopVisualizer() {
     audioContext.close().catch(console.error);
     audioContext = null;
   }
+  analyser = null;
 }
 
 function sendToBackground(base64Audio, apiKey, btnElement) {
@@ -279,6 +301,7 @@ function insertText(text, btnElement) {
   if (inputArea) {
     inputArea.focus();
     
+    // Dispatch input events to simulate user typing (needed for frameworks like React/Angular)
     if (inputArea.tagName === 'TEXTAREA' || inputArea.tagName === 'INPUT') {
       const start = inputArea.selectionStart || 0;
       const end = inputArea.selectionEnd || 0;
@@ -300,12 +323,14 @@ function insertText(text, btnElement) {
       inputArea.dispatchEvent(new Event('change', { bubbles: true }));
     } 
     else {
-      // ContentEditable
-      const success = document.execCommand('insertText', false, text);
-      if (!success) {
-        inputArea.textContent += text;
-        inputArea.dispatchEvent(new Event('input', { bubbles: true }));
-      }
+      // ContentEditable (Gemini uses this extensively)
+      // Use execCommand for broader compatibility, or textContent fallback
+      document.execCommand('insertText', false, text);
+      
+      // Ensure React/Framework listeners catch the change
+      inputArea.dispatchEvent(new Event('input', { bubbles: true }));
+      inputArea.dispatchEvent(new Event('keydown', { bubbles: true }));
+      inputArea.dispatchEvent(new Event('keyup', { bubbles: true }));
     }
   }
 }
@@ -323,22 +348,23 @@ const observer = new MutationObserver((mutations) => {
   // 1. NotebookLM Main Chat Input
   // 2. NotebookLM Modal Input
   // 3. Generic inputs
+  // 4. Gemini Specifics
   
   const potentialInputs = document.querySelectorAll(`
     textarea.query-box-input:not(.has-gemini-voice),
     textarea.query-box-textarea:not(.has-gemini-voice),
     textarea:not(.has-gemini-voice), 
     div[contenteditable="true"][role="textbox"]:not(.has-gemini-voice),
-    input[type="text"]:not(.has-gemini-voice)
+    input[type="text"]:not(.has-gemini-voice),
+    rich-textarea > div > p:not(.has-gemini-voice)
   `);
 
   potentialInputs.forEach(input => {
     // Filter out irrelevant inputs (hidden, very small, etc)
     if (input.offsetParent === null || input.offsetWidth < 50) return;
 
-    // Check against placeholders to avoid injecting into completely wrong places
-    // But be permissive enough for "Search" or "Start typing"
-    const placeholder = input.getAttribute('placeholder') || input.getAttribute('aria-label') || "";
+    // Filter out inputs that are likely search bars in headers (optional, but good heuristic)
+    if (input.getAttribute('aria-label')?.includes('Search')) return;
     
     injectButton(input);
   });
@@ -347,14 +373,56 @@ const observer = new MutationObserver((mutations) => {
 function injectButton(inputElement) {
   if (inputElement.classList.contains('has-gemini-voice')) return;
   
+  // Identify if we are in Gemini
+  const isGemini = window.location.hostname.includes('gemini.google.com');
+
   const btn = createMicButton();
 
-  // NOTEBOOKLM SPECIFIC PLACEMENT LOGIC
+  // --- GEMINI SPECIFIC LOGIC ---
+  if (isGemini) {
+    // Gemini Input Structure: 
+    // <div class="input-area"> ... <rich-textarea> ... <div class="input-buttons"> <button aria-label="Send message">
+    
+    // Strategy: Look for the 'Send' button wrapper
+    // Usually finding the closest common ancestor for input and send button
+    
+    // 1. Try to find the Send button directly
+    const inputArea = inputElement.closest('.input-area') || inputElement.closest('div[class*="input-area"]');
+    
+    // Selectors for Gemini's Send Button
+    const geminiSendSelectors = [
+      'button[aria-label="Send message"]',
+      'button[aria-label="Send"]',
+      'div[role="button"][aria-label="Send message"]',
+      '.send-button'
+    ];
+    
+    let sendBtn = null;
+    let container = inputArea || inputElement.parentElement.parentElement; // Fallback to grand-parent
+    
+    if (container) {
+      for (let sel of geminiSendSelectors) {
+        const found = container.querySelector(sel);
+        if (found) {
+          sendBtn = found;
+          break;
+        }
+      }
+    }
 
-  // 1. Main Chat Bar (NotebookLM)
-  // Input class: 'query-box-input'
-  // Container class: 'message-container'
-  // Sibling Button class: 'submit-button'
+    if (sendBtn) {
+       inputElement.classList.add('has-gemini-voice');
+       // Insert before the Send button
+       // Often Send button is in a wrapper, we want to be inside that wrapper if possible
+       const sendWrapper = sendBtn.parentElement;
+       sendWrapper.insertBefore(btn, sendBtn);
+       sendWrapper.style.display = 'flex'; // Ensure alignment
+       sendWrapper.style.alignItems = 'center';
+       return;
+    }
+  }
+
+  // --- NOTEBOOKLM SPECIFIC LOGIC ---
   if (inputElement.classList.contains('query-box-input')) {
     const container = inputElement.closest('.message-container');
     if (container) {
@@ -367,55 +435,43 @@ function injectButton(inputElement) {
     }
   }
 
-  // 2. Add Source Modal (NotebookLM)
-  // Input class: 'query-box-textarea'
-  // Container class: 'query-box' (Flex container)
   if (inputElement.classList.contains('query-box-textarea')) {
     const queryBox = inputElement.closest('.query-box');
     if (queryBox) {
       inputElement.classList.add('has-gemini-voice');
-      // Append to the end of the flex container (right of the input)
       queryBox.appendChild(btn);
       return;
     }
   }
 
-  // GENERIC PLACEMENT LOGIC (Fallback for Gemini / other parts)
-  
-  // Case 3: Generic Chat Box (e.g. Gemini)
-  // Look for a submit/send button
-  const container = inputElement.closest('div.input-area, form, footer, main') || inputElement.parentElement;
+  // --- GENERIC FALLBACK ---
+  // Look for a submit/send button near the input
+  const container = inputElement.closest('form') || inputElement.closest('div[class*="input"]') || inputElement.parentElement;
   
   if (container) {
     const sendSelectors = [
-      'button.submit-button',
-      '.actions-enter-button',
+      'button[type="submit"]',
       'button[aria-label*="Send"]',
-      'button[aria-label*="发送"]', // Chinese Send
-      'button[aria-label*="Submit"]',
-      'button[aria-label*="提交"]', // Chinese Submit
-      '.send-button',
-      'button:has(svg)'
+      'div[role="button"][aria-label*="Send"]',
+      'button:has(svg)', // Buttons with icons are likely controls
+      '.send-button'
     ];
 
     let sendButton = null;
     for (let selector of sendSelectors) {
-      // Find a button inside the container that is NOT our button
-      // and NOT a menu button (often has 'more_vert')
       const candidate = container.querySelector(selector);
-      if (candidate && !candidate.classList.contains('gemini-voice-btn')) {
+      if (candidate && !candidate.classList.contains('gemini-voice-btn') && candidate !== inputElement) {
         sendButton = candidate;
         break;
       }
     }
 
     if (sendButton && sendButton.parentElement) {
-      // Insert next to send button
       inputElement.classList.add('has-gemini-voice');
       sendButton.parentElement.insertBefore(btn, sendButton);
       sendButton.parentElement.style.alignItems = 'center';
     } else {
-      // Fallback: Append to input's direct parent
+      // Last resort: Append to input's parent
       if (inputElement.parentElement) {
          inputElement.classList.add('has-gemini-voice');
          inputElement.parentElement.appendChild(btn);
