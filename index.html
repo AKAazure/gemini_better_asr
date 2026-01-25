@@ -15,11 +15,13 @@
       --slate-900: #0f172a;
       --green-600: #16a34a;
       --white: #ffffff;
+      --red-500: #ef4444;
     }
 
     body {
       width: 350px;
-      height: 320px;
+      /* Increased height to fit the new test section */
+      height: 460px; 
       margin: 0;
       padding: 0;
       background-color: var(--slate-50);
@@ -70,6 +72,7 @@
       display: flex;
       flex-direction: column;
       gap: 16px;
+      overflow-y: auto; /* Allow scrolling if needed */
     }
 
     .card {
@@ -119,7 +122,7 @@
     }
 
     /* Button */
-    button {
+    button#saveBtn {
       margin-top: auto;
       width: 100%;
       padding: 10px;
@@ -137,12 +140,12 @@
       color: var(--white);
     }
 
-    button:hover {
+    button#saveBtn:hover {
       background-color: #1e293b;
     }
 
     button.success {
-      background-color: var(--green-600);
+      background-color: var(--green-600) !important;
     }
 
     /* Icons */
@@ -154,6 +157,56 @@
       stroke-linecap: round;
       stroke-linejoin: round;
       fill: none;
+    }
+
+    /* --- Waveform Test Styles --- */
+    .gemini-voice-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 50px;
+      height: 50px;
+      min-width: 50px;
+      border-radius: 50%;
+      border: none;
+      cursor: pointer;
+      background: var(--slate-50);
+      color: var(--slate-900);
+      transition: background 0.2s, transform 0.1s;
+      outline: none;
+      border: 1px solid var(--slate-200);
+    }
+
+    .gemini-voice-btn:hover {
+      background: var(--slate-200);
+    }
+
+    .gemini-voice-btn:active {
+      transform: scale(0.95);
+    }
+
+    .gemini-voice-btn.recording {
+      background: rgba(239, 68, 68, 0.1);
+      color: var(--red-500);
+      border-color: rgba(239, 68, 68, 0.2);
+    }
+    
+    .gemini-voice-waveform {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      height: 20px;
+      width: 32px;
+    }
+    
+    .gemini-voice-bar {
+      width: 3px;
+      background-color: var(--red-500);
+      border-radius: 2px;
+      height: 10%; 
+      transition: height 0.05s ease;
+      will-change: height;
     }
   </style>
 </head>
@@ -182,6 +235,21 @@
       </div>
       <input type="password" id="apiKeyInput" placeholder="sk-..." />
       <p class="hint">Required for speech-to-text. Keys are stored locally in your browser.</p>
+    </div>
+
+    <!-- New Test Section -->
+    <div class="card">
+      <div class="label">
+        <svg viewBox="0 0 24 24" style="width: 14px; height: 14px; color: var(--blue-600);">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+          <line x1="12" y1="19" x2="12" y2="23"></line>
+          <line x1="8" y1="23" x2="16" y2="23"></line>
+        </svg>
+        Microphone Test
+      </div>
+      <p class="hint">Click to test the visualizer. <br>(No audio is sent during this test)</p>
+      <div id="micTestContainer" style="display: flex; justify-content: center; padding: 4px;"></div>
     </div>
 
     <button id="saveBtn">
