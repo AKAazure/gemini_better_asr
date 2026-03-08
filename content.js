@@ -416,9 +416,37 @@ function injectButton(inputElement) {
 
     if (sendBtn) {
        inputElement.classList.add('has-gemini-voice');
-       // Insert before the Send button
-       // Often Send button is in a wrapper, we want to be inside that wrapper if possible
-       const sendWrapper = sendBtn.parentElement;
+       
+       const sendWrapper = sendBtn.closest('.send-button-container') || sendBtn.parentElement;
+       const buttonsWrapper = sendWrapper.closest('.input-buttons-wrapper-bottom') || sendWrapper.parentElement;
+       
+       // Traverse up to find the container holding both model selector and input buttons
+       if (buttonsWrapper && buttonsWrapper.parentElement) {
+           const parentRow = buttonsWrapper.parentElement;
+           if (parentRow.querySelector('.gemini-voice-btn')) return;
+
+           // Determine insertion target: left of the Fast/Pro chip.
+           // The model selector chip is typically the previous sibling of buttonsWrapper.
+           let insertTarget = buttonsWrapper;
+           const prev = buttonsWrapper.previousElementSibling;
+           
+           if (prev) {
+               // Only target actual elements (avoid empty flex spacers)
+               const text = prev.textContent.trim();
+               const hasIcon = prev.querySelector('svg') !== null;
+               if (text.length > 0 || hasIcon) {
+                   insertTarget = prev;
+               }
+           }
+
+           // Add margin to space it nicely from the selector and other tools
+           btn.style.margin = '0 8px';
+           parentRow.insertBefore(btn, insertTarget);
+           return;
+       }
+       
+       // Fallback: Insert before the Send button wrapper
+       if (sendWrapper.querySelector('.gemini-voice-btn')) return;
        sendWrapper.insertBefore(btn, sendBtn);
        sendWrapper.style.display = 'flex'; // Ensure alignment
        sendWrapper.style.alignItems = 'center';
@@ -426,13 +454,13 @@ function injectButton(inputElement) {
     }
   }
 
-  // --- NOTEBOOKLM SPECIFIC LOGIC ---
   if (inputElement.classList.contains('query-box-input')) {
     const container = inputElement.closest('.message-container');
     if (container) {
       const submitBtn = container.querySelector('.submit-button');
       if (submitBtn) {
         inputElement.classList.add('has-gemini-voice');
+        if (container.querySelector('.gemini-voice-btn')) return;
         container.insertBefore(btn, submitBtn);
         return;
       }
@@ -443,6 +471,7 @@ function injectButton(inputElement) {
     const queryBox = inputElement.closest('.query-box');
     if (queryBox) {
       inputElement.classList.add('has-gemini-voice');
+      if (queryBox.querySelector('.gemini-voice-btn')) return;
       queryBox.appendChild(btn);
       return;
     }
@@ -472,12 +501,14 @@ function injectButton(inputElement) {
 
     if (sendButton && sendButton.parentElement) {
       inputElement.classList.add('has-gemini-voice');
+      if (sendButton.parentElement.querySelector('.gemini-voice-btn')) return;
       sendButton.parentElement.insertBefore(btn, sendButton);
       sendButton.parentElement.style.alignItems = 'center';
     } else {
       // Last resort: Append to input's parent
       if (inputElement.parentElement) {
          inputElement.classList.add('has-gemini-voice');
+         if (inputElement.parentElement.querySelector('.gemini-voice-btn')) return;
          inputElement.parentElement.appendChild(btn);
          inputElement.parentElement.style.display = 'flex';
          inputElement.parentElement.style.alignItems = 'center';
